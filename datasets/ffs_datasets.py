@@ -1,4 +1,5 @@
 import os
+import glob
 import json
 import torch
 import decord
@@ -154,6 +155,63 @@ class FaceForensics(torch.utils.data.Dataset):
         video = vframes[frame_indice]
         # videotransformer data proprecess
         video = self.transform(video) # T C H W
+        return {'video': video, 'video_name': 1}
+
+    def __len__(self):
+        return len(self.video_lists)
+
+
+class FaceForensicsFrames(torch.utils.data.Dataset):
+    """Load the FaceForensics video frames from extracted image folders
+    
+    Args:
+        target_video_len (int): the number of video frames to be loaded.
+        align_transform (callable): Align different videos to a specified size.
+        temporal_sample (callable): Sample the target length of a video.
+    """
+
+    def __init__(self,
+                 configs,
+                 transform=None,
+                 temporal_sample=None):
+        self.configs = configs
+        self.data_path = configs.data_path
+        self.video_lists = [d for d in os.listdir(self.data_path)]
+        self.transform = transform
+        self.temporal_sample = temporal_sample
+        self.target_video_len = self.configs.num_frames
+
+    def load_images(self, folder_path, selected_indices):
+        images = []
+        for idx in selected_indices:
+            img_path = os.path.join(folder_path, f"{idx+1:06d}.jpg")
+            img = Image.open(img_path).convert("RGB")
+            if img is None:
+                raise FileNotFoundError(f"Image {img_path} not found.")
+            images.append(img)
+        return np.array(images)
+
+    def __getitem__(self, index):
+        # Get the folder path for the current video
+        video_folder_path = os.path.join(self.data_path, self.video_lists[index])
+        frame_paths = sorted(glob.glob(os.path.join(video_folder_path, '*.jpg')))  # Assuming frames are saved as .jpg
+        total_frames = len(frame_paths)
+
+        # Sampling video frames
+        start_frame_ind, end_frame_ind = self.temporal_sample(total_frames)
+        assert end_frame_ind - start_frame_ind >= self.target_video_len
+
+        # Get the specific frame indices to load
+        frame_indices = np.linspace(start_frame_ind, end_frame_ind - 1, self.target_video_len, dtype=int)
+
+        # Load the corresponding frames
+        video = self.load_images(video_folder_path, frame_indices)
+        video = torch.tensor(np.transpose(video, (0, 3, 1, 2)))
+
+        # Apply the transform to the entire sequence of frames
+        if self.transform:
+            video = self.transform(video)
+
         return {'video': video, 'video_name': 1}
 
     def __len__(self):

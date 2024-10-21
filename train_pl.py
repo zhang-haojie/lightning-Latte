@@ -10,7 +10,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
 from glob import glob
 from models import get_models
-from datasets import get_dataset
+from datasets import get_dataset, get_dataset_simple
 from diffusion import create_diffusion
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
@@ -78,14 +78,18 @@ class LatteTrainingModule(LightningModule):
         # self.global_step = int(args.pretrained.split("/")[-1].split(".")[0])    # dirty implementation
 
     def training_step(self, batch, batch_idx):
-        x = batch["video"].to(self.device)
-        video_name = batch["video_name"]
+        if "latent" in self.args.dataset:
+            x = batch["video_latent"].to(self.device)
+            video_name = batch["video_name"]
 
-        with torch.no_grad():
-            b, _, _, _, _ = x.shape
-            x = rearrange(x, "b f c h w -> (b f) c h w").contiguous()
-            x = self.vae.encode(x).latent_dist.sample().mul_(0.18215)
-            x = rearrange(x, "(b f) c h w -> b f c h w", b=b).contiguous()
+        else:
+            x = batch["video"].to(self.device)
+            video_name = batch["video_name"]
+            with torch.no_grad():
+                b, _, _, _, _ = x.shape
+                x = rearrange(x, "b f c h w -> (b f) c h w").contiguous()
+                x = self.vae.encode(x).latent_dist.sample().mul_(0.18215)
+                x = rearrange(x, "(b f) c h w -> b f c h w", b=b).contiguous()
 
         if self.args.extras == 78:  # text-to-video
             raise ValueError("T2V training is not supported at this moment!")
@@ -183,7 +187,7 @@ def main(args):
     tb_logger = TensorBoardLogger(experiment_dir, name="latte")
 
     # Create the dataset and dataloader
-    dataset = get_dataset(args)
+    dataset = get_dataset_simple(args)
     loader = DataLoader(
         dataset,
         batch_size=args.local_batch_size,
